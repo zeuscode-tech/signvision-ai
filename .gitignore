@@ -1,0 +1,17 @@
+.venv/
+frontend/node_modules/
+frontend/dist/
+frontend/public/models/*.task
+frontend/public/mediapipe/*
+data/*.db
+models/*.joblib
+datasets/slovo/slovo_mediapipe.json
+backend/.test-data/
+backend/.test-models/
+__pycache__/
+.pytest_cache/
+.DS_Store
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
