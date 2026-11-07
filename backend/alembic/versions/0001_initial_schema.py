@@ -23,13 +23,49 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+_NEW_TABLES_REVERSE = (
+    "training_jobs",
+    "training_samples",
+    "training_sessions",
+    "training_classes",
+    "srs_items",
+    "lesson_attempts",
+    "lessons",
+    "recognition_events",
+    "recognition_sessions",
+    "model_registry",
+    "settings",
+)
+
+
+def _recover_interrupted_legacy_upgrade(bind: sa.Connection, existing: set[str]) -> set[str]:
+    """Remove only the empty new schema left by an interrupted legacy migration.
+
+    SQLite DDL is non-transactional. If the first migration failed after renaming
+    the old samples table, the legacy tables still contain the user's data while
+    some new empty tables remain. Re-running the migration must clean those new
+    tables before trying again instead of asking the user to delete the database.
+    """
+    if "gesture_classes" not in existing or "legacy_training_samples" not in existing:
+        return existing
+    for table in _NEW_TABLES_REVERSE:
+        if table in existing:
+            bind.execute(sa.text(f'DROP TABLE "{table}"'))  # names are fixed above
+    return set(sa.inspect(bind).get_table_names())
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     existing = set(sa.inspect(bind).get_table_names())
+    existing = _recover_interrupted_legacy_upgrade(bind, existing)
     legacy = "gesture_classes" in existing
-    if legacy:
+    if legacy and "legacy_training_samples" not in existing:
         # The old schema used the same name for a table with different columns.
         op.rename_table("training_samples", "legacy_training_samples")
+    if legacy:
+        # SQLite keeps explicit index names when a table is renamed. The old index
+        # would otherwise collide with the identically named index on the new table.
+        op.execute("DROP INDEX IF EXISTS ix_training_samples_session_id")
 
     op.create_table(
         "settings",

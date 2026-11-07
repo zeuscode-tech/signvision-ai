@@ -53,6 +53,7 @@ def test_legacy_schema_data_is_migrated(tmp_path: Path) -> None:
                 "features_json TEXT, created_at DATETIME)"
             )
         )
+        c.execute(text("CREATE INDEX ix_training_samples_session_id ON training_samples (session_id)"))
         c.execute(
             text(
                 "CREATE TABLE attempts (id INTEGER PRIMARY KEY, gesture_name VARCHAR(80), mode VARCHAR(20), "
@@ -88,4 +89,49 @@ def test_legacy_schema_data_is_migrated(tmp_path: Path) -> None:
         assert c.execute(text("SELECT gesture_id FROM lesson_attempts")).scalar() == "Привет"
         assert c.execute(text("SELECT interval_days FROM srs_items")).scalar() == 1
     assert "gesture_classes" not in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_interrupted_legacy_migration_is_resumed_without_losing_samples(tmp_path: Path) -> None:
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'interrupted.db'}")
+    features = json.dumps([0.2] * 126)
+    with engine.begin() as c:
+        c.execute(
+            text(
+                "CREATE TABLE gesture_classes (id INTEGER PRIMARY KEY, name VARCHAR(80), description TEXT, "
+                "is_unknown BOOLEAN, created_at DATETIME)"
+            )
+        )
+        c.execute(
+            text(
+                "CREATE TABLE capture_sessions (id INTEGER PRIMARY KEY, gesture_class_id INTEGER, "
+                "created_at DATETIME, note VARCHAR(200))"
+            )
+        )
+        c.execute(
+            text(
+                "CREATE TABLE legacy_training_samples (id INTEGER PRIMARY KEY, session_id INTEGER, "
+                "features_json TEXT, created_at DATETIME)"
+            )
+        )
+        c.execute(
+            text("CREATE INDEX ix_training_samples_session_id ON legacy_training_samples (session_id)")
+        )
+        c.execute(text("CREATE TABLE training_samples (id INTEGER PRIMARY KEY, session_id INTEGER)"))
+        c.execute(text("CREATE TABLE settings (id INTEGER PRIMARY KEY)"))
+        c.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
+        c.execute(text("INSERT INTO gesture_classes VALUES (1, 'Помощь', '', 0, '2025-01-01')"))
+        c.execute(text("INSERT INTO capture_sessions VALUES (1, 1, '2025-01-01', '')"))
+        c.execute(
+            text("INSERT INTO legacy_training_samples VALUES (1, 1, :f, '2025-01-01')"),
+            {"f": features},
+        )
+
+    upgrade_to_head(engine)
+
+    with engine.connect() as c:
+        assert c.execute(text("SELECT name FROM training_classes")).scalar() == "Помощь"
+        assert c.execute(text("SELECT features_json FROM training_samples")).scalar() == features
+        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0001"
+    assert "legacy_training_samples" not in inspect(engine).get_table_names()
     engine.dispose()
