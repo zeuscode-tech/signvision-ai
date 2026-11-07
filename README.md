@@ -59,7 +59,7 @@ chmod +x setup.sh start.sh
 ./setup.sh
 ```
 
-`setup.sh` один раз устанавливает зависимости, копирует WASM MediaPipe и скачивает официальные модели Hand Landmarker и Bukva. После этого работа приложения не требует интернета.
+`setup.sh` один раз устанавливает зависимости, копирует WASM MediaPipe и скачивает официальные модели Hand Landmarker, Bukva и Easy Sign S3D. После этого работа приложения не требует интернета.
 
 Если Python расположен иначе:
 

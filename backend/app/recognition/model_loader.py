@@ -217,18 +217,49 @@ def load_model(manifest_path: Path, model_root: Path, default_providers: list[st
     report.passed("labels", f"{len(labels)} классов")
 
     providers = _choose_providers(manifest.providers or default_providers)
+    session_error: Exception | None = None
     try:
         options = ort.SessionOptions()
         options.log_severity_level = 3
         session = ort.InferenceSession(str(model_file), sess_options=options, providers=providers)
     except Exception as exc:
-        raise _fail(
-            report,
-            ErrorCode.MODEL_INVALID,
-            "session",
-            f"ONNX Runtime не смог загрузить модель: {type(exc).__name__}",
-        ) from exc
-    report.passed("session", ", ".join(session.get_providers()))
+        session_error = exc
+        # Hardware providers can be available according to ONNX Runtime but still fail
+        # while compiling a particular graph (for example CoreML in a restricted temp
+        # directory). A demo must not lose the whole model when the portable CPU provider
+        # can run it, so retry once on CPU before declaring the model invalid.
+        if providers != ["CPUExecutionProvider"] and "CPUExecutionProvider" in providers:
+            logger.warning(
+                "Model %s failed with providers=%s (%s); retrying on CPU",
+                manifest.id,
+                ",".join(providers),
+                type(exc).__name__,
+            )
+            try:
+                options = ort.SessionOptions()
+                options.log_severity_level = 3
+                session = ort.InferenceSession(
+                    str(model_file), sess_options=options, providers=["CPUExecutionProvider"]
+                )
+            except Exception as cpu_exc:
+                raise _fail(
+                    report,
+                    ErrorCode.MODEL_INVALID,
+                    "session",
+                    "ONNX Runtime не смог загрузить модель ни через аппаратный provider, ни через CPU: "
+                    f"{type(cpu_exc).__name__}",
+                ) from cpu_exc
+        else:
+            raise _fail(
+                report,
+                ErrorCode.MODEL_INVALID,
+                "session",
+                f"ONNX Runtime не смог загрузить модель: {type(exc).__name__}",
+            ) from exc
+    provider_message = ", ".join(session.get_providers())
+    if session_error is not None:
+        provider_message += f" (fallback после {type(session_error).__name__})"
+    report.passed("session", provider_message)
 
     inputs = session.get_inputs()
     if len(inputs) != 1:

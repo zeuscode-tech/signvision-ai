@@ -80,6 +80,10 @@ export function Studio() {
 
   const repeats = current?.session_count ?? 0
   const metrics = job?.metrics as { accuracy?: number; macro_f1?: number; test_sessions?: number } | null
+  const classReady = (item: TrainingClass) => item.session_count >= MIN_REPEATS && item.sample_count >= 6
+  const gesturesReady = gestures.length > 0 && gestures.every(classReady)
+  const backgroundReady = !!background && classReady(background)
+  const readyToTrain = gesturesReady && backgroundReady
 
   return <div className="screen">
     <header style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -118,14 +122,15 @@ export function Studio() {
                 <div className="meter meter--small">{Array.from({ length: TARGET_REPEATS }, (_, i) => <i key={i} className={i < repeats ? 'on' : ''} />)}</div>
                 <button type="button" className="btn btn--ember" disabled={!current || !cameraOn || !!recording} onClick={() => recordRepeat('gesture')}>{recording === 'gesture' ? 'Записываю…' : 'Записать повтор'}</button>
                 <button type="button" className="btn btn--soft" disabled={!cameraOn || !!recording} onClick={() => recordRepeat('background')}>{recording === 'background' ? 'Записываю фон…' : `Записать фон · ${background?.session_count ?? 0}`}</button>
-                <span className="note">Фон — руки в кадре, но без жеста. Нужен, чтобы система умела говорить «это не ваш жест».</span>
+                <span className="note">Фон — руки в кадре, но без целевого жеста. Запишите минимум {MIN_REPEATS} независимых повтора, лучше 5: система научится говорить «это не ваш жест».</span>
               </div></div>
             <div className={`step ${check ? 'step--now' : ''}`}><span className="step__n">3</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <strong>Проверка</strong>
                 <span className="note">Обучение займёт несколько секунд. Потом покажите жест — проверим, узнаёт ли система.</span>
-                <button type="button" className="btn btn--ink" disabled={!gestures.length || (job?.status === 'running' || job?.status === 'queued')} onClick={train}>
+                <button type="button" className="btn btn--ink" disabled={!readyToTrain || (job?.status === 'running' || job?.status === 'queued')} onClick={train}>
                   {job?.status === 'running' || job?.status === 'queued' ? 'Обучаю…' : 'Обучить и проверить'}</button>
+                {!readyToTrain && <span className="note">Для честной проверки нужны минимум {MIN_REPEATS} отдельных повтора каждого жеста и минимум {MIN_REPEATS} повтора фона.</span>}
                 {metrics?.accuracy !== undefined && <span className="note">Точность на отложенных повторах: {Math.round(metrics.accuracy * 100)}% · F1 {Math.round((metrics.macro_f1 ?? 0) * 100)}% · проверено на {metrics.test_sessions} независимых повторах</span>}
               </div></div>
           </div>
