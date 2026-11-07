@@ -46,12 +46,12 @@ export function CameraView({ onFrame, compact = false, includeImage = false }: P
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.save(); ctx.translate(canvas.width, 0); ctx.scale(-1, 1)
       for (const hand of result.landmarks) {
-        ctx.strokeStyle = '#8b7bff'; ctx.lineWidth = 3
+        ctx.strokeStyle = 'rgba(255,107,53,.8)'; ctx.lineWidth = 3
         connections.forEach(([a,b]) => {
           ctx.beginPath(); ctx.moveTo(hand[a].x*canvas.width, hand[a].y*canvas.height)
           ctx.lineTo(hand[b].x*canvas.width, hand[b].y*canvas.height); ctx.stroke()
         })
-        ctx.fillStyle = '#d8d3ff'
+        ctx.fillStyle = '#FFD9C7'
         hand.forEach(p => { ctx.beginPath(); ctx.arc(p.x*canvas.width,p.y*canvas.height,4,0,Math.PI*2);ctx.fill() })
       }
       ctx.restore()
