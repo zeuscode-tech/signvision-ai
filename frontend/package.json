@@ -9,6 +9,9 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.1.2",
+    "@fontsource/onest": "^5.1.1",
+    "@fontsource/unbounded": "^5.1.1",
     "@mediapipe/tasks-vision": "0.10.22-rc.20250304",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
@@ -22,4 +25,3 @@
     "vite": "^6.0.5"
   }
 }
-

@@ -1,16 +1,60 @@
-import { useEffect, useState } from 'react'
-import { BarChart3, BookOpen, BrainCircuit, CircleGauge, GraduationCap, Languages, Menu, ScanLine, Settings as SettingsIcon, Sparkles, X } from 'lucide-react'
-import type { NavKey } from './types'
-import { Dashboard } from './pages/Dashboard'
-import { Learn } from './pages/Learn'
-import { Practice } from './pages/Practice'
-import { Studio } from './pages/Studio'
-import { Progress } from './pages/Progress'
+import { useCallback, useEffect, useState, type ComponentType } from 'react'
+import { IconHand, IconHome, IconLearn, IconScreen, IconSliders, IconStudio, Logo } from './components/Icons'
+import { ConversationProvider } from './lib/conversation'
+import { applyPrefs, usePrefs } from './lib/prefs'
+import { Home } from './pages/Home'
+import { LearnHub } from './pages/LearnHub'
+import { Live } from './pages/Live'
+import { Partner } from './pages/Partner'
 import { Settings } from './pages/Settings'
-import { Alphabet } from './pages/Alphabet'
+import { Studio } from './pages/Studio'
 
-const nav:[NavKey,string,React.ElementType][]=[['dashboard','Обзор',CircleGauge],['learn','Обучение',BookOpen],['alphabet','Алфавит',Languages],['practice','Практика',GraduationCap],['quiz','Квиз',Sparkles],['recognition','Распознавание',ScanLine],['studio','AI Studio',BrainCircuit],['progress','Прогресс',BarChart3],['settings','Настройки',SettingsIcon]]
+type Route = 'home' | 'live' | 'partner' | 'partner-window' | 'learn' | 'studio' | 'settings'
+const NAV: Array<[Route, string, ComponentType<{ size?: number }>]> = [
+  ['home', 'Главная', IconHome], ['live', 'Разговор', IconHand], ['partner', 'Собеседник', IconScreen],
+  ['learn', 'Обучение', IconLearn], ['studio', 'Студия', IconStudio], ['settings', 'Настройки', IconSliders],
+]
+const ROUTES = new Set<string>([...NAV.map(([id]) => id), 'partner-window'])
+const TITLES: Record<Route, string> = { home: 'Главная', live: 'Разговор', partner: 'Собеседник', 'partner-window': 'Собеседник', learn: 'Обучение', studio: 'Студия жестов', settings: 'Настройки' }
 
-export default function App(){const [page,setPage]=useState<NavKey>('dashboard');const [theme,setTheme]=useState(localStorage.getItem('sv-theme')||'dark');const [menu,setMenu]=useState(false);useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem('sv-theme',theme)},[theme]);const go=(p:NavKey)=>{setPage(p);setMenu(false)};return <div className="app"><header className="mobile-head"><Brand/><button className="icon-button" onClick={()=>setMenu(!menu)}>{menu?<X/>:<Menu/>}</button></header><aside className={`sidebar ${menu?'sidebar--open':''}`}><Brand/><nav>{nav.map(([id,label,Icon])=><button key={id} className={page===id?'active':''} onClick={()=>go(id)}><Icon/><span>{label}</span></button>)}</nav><div className="sidebar__local"><span className="pulse"/><div><strong>Локальный режим</strong><small>Данные на этом Mac</small></div></div></aside><main>{page==='dashboard'&&<Dashboard navigate={go}/>} {page==='learn'&&<Learn/>}{page==='alphabet'&&<Alphabet/>}{page==='practice'&&<Practice/>}{page==='quiz'&&<Practice quiz/>}{page==='recognition'&&<Practice recognition/>}{page==='studio'&&<Studio/>}{page==='progress'&&<Progress/>}{page==='settings'&&<Settings theme={theme} toggleTheme={()=>setTheme(theme==='dark'?'light':'dark')}/>}</main></div>}
-function Brand(){return <div className="brand"><div className="brand__mark">S</div><div><strong>SignVision</strong><span>AI Trainer</span></div></div>}
+const readRoute = (): Route => { const hash = location.hash.slice(1); return (ROUTES.has(hash) ? hash : 'home') as Route }
 
+export default function App() {
+  const prefs = usePrefs()
+  const [route, setRoute] = useState<Route>(readRoute)
+  useEffect(() => { applyPrefs(prefs) }, [prefs])
+  useEffect(() => {
+    const media = matchMedia('(prefers-color-scheme: dark)')
+    const sync = () => applyPrefs(prefs)
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [prefs])
+  useEffect(() => {
+    const onHash = () => setRoute(readRoute())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+  useEffect(() => { document.title = `${TITLES[route]} · SignBridge` }, [route])
+  const navigate = useCallback((next: string) => { location.hash = next }, [])
+
+  if (route === 'partner-window') return <ConversationProvider><Partner navigate={navigate} solo /></ConversationProvider>
+
+  return <ConversationProvider>
+    <div className="app">
+      <nav className="rail" aria-label="Разделы приложения">
+        <span className="rail__logo"><Logo /></span>
+        {NAV.map(([id, label, Icon]) => <a key={id} href={`#${id}`} aria-current={route === id ? 'page' : undefined}><Icon size={26} />{label}</a>)}
+        <span className="rail__spacer" />
+        <span className="rail__offline"><span className="dot" />ОФЛАЙН</span>
+      </nav>
+      <main className="view">
+        {route === 'home' && <Home navigate={navigate} />}
+        {route === 'live' && <Live navigate={navigate} />}
+        {route === 'partner' && <Partner navigate={navigate} />}
+        {route === 'learn' && <LearnHub />}
+        {route === 'studio' && <Studio />}
+        {route === 'settings' && <Settings />}
+      </main>
+    </div>
+  </ConversationProvider>
+}

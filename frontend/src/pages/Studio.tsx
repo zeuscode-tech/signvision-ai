@@ -1,33 +1,153 @@
-import { useCallback, useEffect, useState } from 'react'
-import { BrainCircuit, Plus, Save, Trash2 } from 'lucide-react'
-import { api } from '../api'
-import type { CameraFrame, GestureClass } from '../types'
-import { CameraView } from '../components/CameraView'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { LiveCamera, type HandsInfo } from '../components/LiveCamera'
+import { IconTrash } from '../components/Icons'
+import { v1, type Prediction, type TrainingClass, type TrainingJob } from '../lib/v1'
 
-type Sample = { id: number; created_at: string }
+const NEGATIVE = 'фон'
+const TARGET_REPEATS = 10
+const MIN_REPEATS = 2
+const SAMPLES_PER_REPEAT = 4
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 export function Studio() {
-  const [classes,setClasses]=useState<GestureClass[]>([]); const [selected,setSelected]=useState<number|''>('')
-  const [session,setSession]=useState<number|null>(null); const [frame,setFrame]=useState<number[]|null>(null)
-  const [samples,setSamples]=useState<Sample[]>([]); const [message,setMessage]=useState(''); const [metrics,setMetrics]=useState<Record<string, unknown>|null>(null)
-  const refresh=()=>api.classes().then(rows=>{setClasses(rows);if(!selected&&rows.length)setSelected(rows[0].id)})
-  useEffect(()=>{refresh()},[])
-  const onFrame=useCallback((x:CameraFrame)=>setFrame(x.landmarks),[])
-  const create=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const form=new FormData(e.currentTarget);await api.createClass({name:String(form.get('name')),description:String(form.get('description')||''),is_unknown:form.get('unknown')==='on'});e.currentTarget.reset();refresh()}
-  const begin=async()=>{if(!selected)return;const x=await api.createSession(selected);setSession(x.id);setSamples([]);setMessage('Новая независимая сессия начата')}
-  const capture=async()=>{if(!session||!frame)return;await api.addSample(session,frame);setSamples(await api.samples(session));setMessage('Landmarks сохранены — исходное видео не записывалось')}
-  const removeSample=async(id:number)=>{if(!session)return;await api.deleteSample(id);setSamples(await api.samples(session))}
-  const train=async()=>{try{setMessage('Обучение…');const result=await api.train();setMetrics(result);setMessage('Модель обучена и сохранена локально')}catch(e){setMessage(e instanceof Error?e.message:'Ошибка обучения')}}
-  return <div className="page"><div className="page-title"><div><span className="eyebrow">AI Training Studio</span><h1>Научите систему своим жестам</h1><p>Записывайте разные сессии в разном освещении. Для честной проверки нужны минимум две независимые сессии каждого класса.</p></div></div>
-    <div className="studio-grid"><div className="studio-main"><CameraView onFrame={onFrame}/><div className="capture-bar card"><div><strong>{samples.length}</strong><span>образцов в этой сессии</span></div><button className="button" onClick={begin} disabled={!selected}><Plus/> Новая сессия</button><button className="button button--primary" onClick={capture} disabled={!session||!frame}><Save/> Сохранить кадр</button></div>{samples.length>0&&<div className="sample-strip card">{samples.slice(0,12).map((sample,index)=><button title="Удалить этот образец" key={sample.id} onClick={()=>removeSample(sample.id)}><span>{samples.length-index}</span><Trash2/></button>)}</div>}{message&&<div className="status-line">{message}</div>}</div>
-      <aside className="studio-side"><form className="card form" onSubmit={create}><span className="eyebrow">Новый класс</span><label>Название<input name="name" required placeholder="Например: мой жест 1"/></label><label>Описание<textarea name="description" placeholder="Источник и примечания"/></label><label className="check"><input type="checkbox" name="unknown"/> Это отрицательный класс «неизвестно»</label><button className="button button--primary" type="submit"><Plus/> Создать класс</button></form>
-      <div className="card class-list"><div className="class-list__head"><span className="eyebrow">Датасет</span><button className="icon-button" onClick={refresh}>↻</button></div>{classes.map(item=><div className={`class-row ${selected===item.id?'active':''}`} key={item.id} onClick={()=>{setSelected(item.id);setSession(null);setSamples([])}}><div><strong>{item.name}</strong><small>{item.sample_count} образцов · {item.session_count} сессий</small></div><button className="icon-button danger" aria-label="Удалить" onClick={async e=>{e.stopPropagation();await api.deleteClass(item.id);refresh()}}><Trash2/></button></div>)}{!classes.length&&<p className="muted">Создайте обычный и отрицательный классы.</p>}<button className="button button--primary train-button" onClick={train}><BrainCircuit/> Обучить модель</button></div></aside></div>
-    {metrics&&<Metrics data={metrics}/>}</div>
-}
+  const [classes, setClasses] = useState<TrainingClass[]>([])
+  const [selected, setSelected] = useState<number | null>(null)
+  const [name, setName] = useState('')
+  const [cameraOn, setCameraOn] = useState(false)
+  const [recording, setRecording] = useState<'gesture' | 'background' | null>(null)
+  const [message, setMessage] = useState('')
+  const [job, setJob] = useState<TrainingJob | null>(null)
+  const [check, setCheck] = useState(false)
+  const [prediction, setPrediction] = useState<Prediction | null>(null)
+  const hands = useRef<HandsInfo | null>(null)
+  const lastPredict = useRef(0)
 
-function Metrics({data}:{data:Record<string,unknown>}) {
-  const m=data.metrics as Record<string,unknown>|null
-  if(!m)return <section className="card metrics"><div className="section-head"><div><span className="eyebrow">Результат обучения</span><h2>Объективная оценка пока невозможна</h2></div></div><p>Модель обучена на всех данных, но для test split не хватает минимум двух независимых сессий каждого класса. Соберите новые сессии — не просто соседние кадры.</p></section>
-  const labels=m.labels as string[], matrix=m.confusion_matrix as number[][]
-  return <section className="card metrics"><div className="section-head"><div><span className="eyebrow">Результат обучения</span><h2>Проверка на независимых сессиях</h2></div></div><div className="metric-cards">{labels.map((label,i)=><div key={label}><strong>{label}</strong><span>Precision {Math.round((m.precision as number[])[i]*100)}%</span><span>Recall {Math.round((m.recall as number[])[i]*100)}%</span><span>F1 {Math.round((m.f1 as number[])[i]*100)}%</span></div>)}</div><div className="matrix-wrap"><h3>Confusion matrix</h3><table><thead><tr><th>Факт ↓ / прогноз →</th>{labels.map(x=><th key={x}>{x}</th>)}</tr></thead><tbody>{matrix.map((row,i)=><tr key={labels[i]}><th>{labels[i]}</th>{row.map((value,j)=><td key={j}>{value}</td>)}</tr>)}</tbody></table></div><p className="fineprint">Стратифицированное разделение: целые capture sessions. Тестовых образцов: {String(m.test_samples)}.</p></section>
+  const refresh = useCallback(() => v1.classes().then(rows => {
+    setClasses(rows)
+    setSelected(current => current ?? rows.find(r => !r.is_negative)?.id ?? null)
+  }).catch(() => setMessage('Локальный сервер недоступен')), [])
+  useEffect(() => { void refresh() }, [refresh])
+
+  const gestures = classes.filter(c => !c.is_negative)
+  const background = classes.find(c => c.is_negative)
+  const current = classes.find(c => c.id === selected) ?? null
+
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!name.trim()) return
+    try { const row = await v1.createClass(name.trim()); setName(''); setSelected(row.id); await refresh(); setCameraOn(true) }
+    catch (e) { setMessage(e instanceof Error ? e.message : 'Не удалось создать жест') }
+  }
+
+  // One repeat = one independent capture session with a few frames while the hand is visible.
+  const recordRepeat = async (kind: 'gesture' | 'background') => {
+    let target = kind === 'gesture' ? current : background
+    if (kind === 'background' && !target) target = await v1.createClass(NEGATIVE, true)
+    if (!target) return
+    setRecording(kind); setMessage('')
+    try {
+      await sleep(600)
+      const session = await v1.createSession(target.id)
+      let saved = 0, attempts = 0
+      while (saved < SAMPLES_PER_REPEAT && attempts < 30) {
+        attempts += 1
+        const landmarks = hands.current?.landmarks
+        if (landmarks) { await v1.addSample(session.id, landmarks).then(() => { saved += 1 }).catch(() => {}) }
+        await sleep(220)
+      }
+      setMessage(saved ? `Повтор записан: ${saved} кадра. Немного меняйте угол и свет.` : 'Руки не видны — повтор не записан.')
+    } finally { setRecording(null); await refresh() }
+  }
+
+  const train = async () => {
+    setMessage(''); setPrediction(null)
+    try {
+      let state = await v1.startJob()
+      setJob(state)
+      while (state.status === 'queued' || state.status === 'running') { await sleep(800); state = await v1.job(state.id); setJob(state) }
+      if (state.status === 'completed') { setMessage('Модель обучена и включена. Проверьте жест.'); setCheck(true); setCameraOn(true) }
+      else setMessage(state.error_message || 'Обучение не удалось')
+    } catch (e) { setMessage(e instanceof Error ? e.message : 'Обучение не удалось'); setJob(null) }
+  }
+
+  const onHands = useCallback((info: HandsInfo) => {
+    hands.current = info
+    if (!check || !info.landmarks || performance.now() - lastPredict.current < 300) return
+    lastPredict.current = performance.now()
+    v1.predict(info.landmarks).then(setPrediction).catch(() => {})
+  }, [check])
+
+  const repeats = current?.session_count ?? 0
+  const metrics = job?.metrics as { accuracy?: number; macro_f1?: number; test_sessions?: number } | null
+
+  return <div className="screen">
+    <header style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <h1 className="h1">Студия жестов</h1>
+      <p className="note" style={{ fontSize: 19, maxWidth: 760, margin: 0 }}>Научите SignBridge жестам, которых нет в словаре: жест-имя, домашние слова, местные варианты.</p>
+    </header>
+    <div className="two-col">
+      <div style={{ flex: '1.5 1 520px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <LiveCamera active={cameraOn} onActiveChange={setCameraOn} onHands={onHands} label="Камера студии">
+          {cameraOn && <div className="cam__top"><div>
+            <span className="pill pill--dark">{recording ? <><span className="dot dot--ember pulse" />Запись · {recording === 'gesture' ? current?.name : 'фон'}</> : check ? 'Проверка' : current ? `Жест «${current.name}»` : 'Выберите жест'}</span>
+          </div></div>}
+          {check && prediction && <div className="cam__bottom"><div className="cam__hint" style={{ fontSize: 24 }}>
+            {prediction.label ? <>Узнаю: <strong className="display">{prediction.label}</strong> · {Math.round(prediction.confidence * 100)}%</> : prediction.state === 'unknown' ? 'Это не ваш жест (фон)' : `Не уверен · ${Math.round(prediction.confidence * 100)}%`}
+          </div></div>}
+        </LiveCamera>
+        {message && <div className="banner" role="status">{message}</div>}
+      </div>
+
+      <aside style={{ flex: '1 1 380px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <section className="panel panel--ink" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <span className="mono" style={{ fontSize: 13, color: 'var(--ink2)' }}>Новый жест</span>
+          <div className="steps">
+            <div className={`step ${current ? 'step--done' : 'step--now'}`}><span className="step__n">1</span>
+              <form onSubmit={create} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <strong>Название жеста</strong>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input className="input" style={{ flex: '1 1 160px', minHeight: 52 }} value={name} onChange={e => setName(e.target.value)} placeholder="Например: бабушка" aria-label="Название жеста" />
+                  <button type="submit" className="btn btn--ink" disabled={!name.trim()}>Создать</button>
+                </div>
+              </form></div>
+            <div className={`step ${repeats >= TARGET_REPEATS ? 'step--done' : current ? 'step--now' : ''}`}><span className="step__n">2</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <strong>Повторите жест {TARGET_REPEATS} раз</strong>
+                <span className="note">записано {repeats} · минимум {MIN_REPEATS}, лучше {TARGET_REPEATS}; немного меняйте угол и свет</span>
+                <div className="meter meter--small">{Array.from({ length: TARGET_REPEATS }, (_, i) => <i key={i} className={i < repeats ? 'on' : ''} />)}</div>
+                <button type="button" className="btn btn--ember" disabled={!current || !cameraOn || !!recording} onClick={() => recordRepeat('gesture')}>{recording === 'gesture' ? 'Записываю…' : 'Записать повтор'}</button>
+                <button type="button" className="btn btn--soft" disabled={!cameraOn || !!recording} onClick={() => recordRepeat('background')}>{recording === 'background' ? 'Записываю фон…' : `Записать фон · ${background?.session_count ?? 0}`}</button>
+                <span className="note">Фон — руки в кадре, но без жеста. Нужен, чтобы система умела говорить «это не ваш жест».</span>
+              </div></div>
+            <div className={`step ${check ? 'step--now' : ''}`}><span className="step__n">3</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <strong>Проверка</strong>
+                <span className="note">Обучение займёт несколько секунд. Потом покажите жест — проверим, узнаёт ли система.</span>
+                <button type="button" className="btn btn--ink" disabled={!gestures.length || (job?.status === 'running' || job?.status === 'queued')} onClick={train}>
+                  {job?.status === 'running' || job?.status === 'queued' ? 'Обучаю…' : 'Обучить и проверить'}</button>
+                {metrics?.accuracy !== undefined && <span className="note">Точность на отложенных повторах: {Math.round(metrics.accuracy * 100)}% · F1 {Math.round((metrics.macro_f1 ?? 0) * 100)}% · проверено на {metrics.test_sessions} независимых повторах</span>}
+              </div></div>
+          </div>
+        </section>
+
+        <section className="panel" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span className="mono" style={{ fontSize: 13, color: 'var(--ink2)', marginBottom: 6 }}>Мои жесты</span>
+          {!gestures.length && <p className="note" style={{ margin: 0 }}>Пока пусто. Создайте первый жест.</p>}
+          {gestures.map(g => {
+            const ready = g.session_count >= MIN_REPEATS && g.sample_count >= 6
+            return <div key={g.id} className="gesture-row" style={{ cursor: 'pointer' }}>
+              <button type="button" style={{ border: 0, background: 'none', textAlign: 'left', cursor: 'pointer', flex: 1, padding: 0 }} aria-pressed={g.id === selected} onClick={() => setSelected(g.id)}>
+                <strong style={{ textDecoration: g.id === selected ? 'underline' : 'none', textUnderlineOffset: 5 }}>{g.name}</strong>
+                <div className="note">{g.session_count} повторов · {g.sample_count} кадров</div>
+              </button>
+              <span className={`tag ${ready ? 'tag--ok' : 'tag--warn'}`}>{ready ? 'можно обучать' : `ещё ${Math.max(1, MIN_REPEATS - g.session_count)} повт.`}</span>
+              <button type="button" className="btn--round" style={{ width: 44, height: 44 }} aria-label={`Удалить жест ${g.name}`} onClick={async () => { await v1.deleteClass(g.id); if (selected === g.id) setSelected(null); void refresh() }}><IconTrash size={20} /></button>
+            </div>
+          })}
+          <p className="note" style={{ marginBottom: 0 }}>Жесты хранятся только на этом ноутбуке. Сохраняются точки рук, а не видео.</p>
+        </section>
+      </aside>
+    </div>
+  </div>
 }
