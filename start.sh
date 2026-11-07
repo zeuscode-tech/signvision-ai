@@ -23,7 +23,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd "$ROOT_DIR/backend"
-"$ROOT_DIR/.venv/bin/uvicorn" app.main:app --host 127.0.0.1 --port "$BACKEND_PORT" &
+APP_PORT="$BACKEND_PORT" "$ROOT_DIR/.venv/bin/uvicorn" app.main:app --host 127.0.0.1 --port "$BACKEND_PORT" &
 BACKEND_PID=$!
 cd "$ROOT_DIR/frontend"
 export SIGNVISION_BACKEND_ORIGIN="http://127.0.0.1:$BACKEND_PORT"
@@ -32,6 +32,7 @@ FRONTEND_PID=$!
 
 echo "SignVision AI: http://127.0.0.1:$FRONTEND_PORT"
 echo "API:           http://127.0.0.1:$BACKEND_PORT/docs"
+echo "WebSocket:     ws://127.0.0.1:$BACKEND_PORT/ws/recognition"
 echo "Для остановки нажмите Ctrl+C"
 wait "$BACKEND_PID" "$FRONTEND_PID"
 

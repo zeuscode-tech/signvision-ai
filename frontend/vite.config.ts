@@ -8,7 +8,10 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: Number(process.env.SIGNVISION_FRONTEND_PORT || 5173),
-    proxy: { '/api': process.env.SIGNVISION_BACKEND_ORIGIN || 'http://127.0.0.1:8000' },
+    proxy: {
+      '/api': process.env.SIGNVISION_BACKEND_ORIGIN || 'http://127.0.0.1:8000',
+      '/ws': { target: process.env.SIGNVISION_BACKEND_ORIGIN || 'http://127.0.0.1:8000', ws: true },
+    },
   },
 })
 

@@ -4,7 +4,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { headers: { 'Content-Type': 'application/json', ...init?.headers }, ...init })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `HTTP ${response.status}`)
+    throw new Error(data.error?.message || data.detail || `HTTP ${response.status}`)
   }
   return response.json()
 }
@@ -29,6 +29,6 @@ export const api = {
   progress: () => request<Record<string, unknown>>('/api/progress'),
   exportData: () => request<Record<string, unknown>>('/api/export'),
   importData: (body: unknown) => request('/api/import', { method: 'POST', body: JSON.stringify(body) }),
-  deleteData: () => request('/api/data', { method: 'DELETE' }),
+  deleteData: () => request('/api/data?confirm=DELETE_ALL_USER_DATA', { method: 'DELETE' }),
 }
 

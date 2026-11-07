@@ -1,0 +1,33 @@
+{
+  "id": "easy-sign-s3d",
+  "name": "Easy Sign S3D",
+  "version": "1.0",
+  "type": "isolated_sign",
+  "model_path": "s3d.onnx",
+  "labels_path": "labels.json",
+  "input_shape": [1, 3, 32, 224, 224],
+  "frame_count": 32,
+  "output": "logits",
+  "no_event_label": "no",
+  "confidence_threshold": 0.65,
+  "stability_count": 2,
+  "cooldown_ms": 1200,
+  "inference_stride": 4,
+  "providers": ["CPUExecutionProvider"],
+  "preprocessing": {
+    "color": "RGB",
+    "width": 224,
+    "height": 224,
+    "resize": "stretch",
+    "crop": "none",
+    "normalization": "scale_0_1",
+    "layout": "NCTHW"
+  },
+  "source": {
+    "project": "ai-forever/easy_sign",
+    "url": "https://github.com/ai-forever/easy_sign",
+    "license": "CC BY-SA 4.0",
+    "sha256": "860ecb5e5aff91b4709016c2dc4f5744eea53e024f80c0b3b8f0f916f6bdb949",
+    "notes": "1598 isolated RSL signs + 'no'. Preprocessing matches the upstream demo: full RGB frame resized to 224x224, x/255, NCTHW. Threshold 0.65 is a local rejection rule, not an upstream calibration."
+  }
+}

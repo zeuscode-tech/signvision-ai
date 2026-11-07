@@ -13,9 +13,11 @@ from sqlalchemy import select
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
-from app.database import Base, SessionLocal, engine  # noqa: E402
-from app.ml.features import extract_features  # noqa: E402
-from app.models import CaptureSession, GestureClass, TrainingSample  # noqa: E402
+from app.core.config import ensure_directories, get_settings  # noqa: E402
+from app.database import Database  # noqa: E402
+from app.database.migrations import upgrade_to_head  # noqa: E402
+from app.db_models import TrainingClass, TrainingSample, TrainingSession  # noqa: E402
+from app.training.features import FeatureError, extract_static_features  # noqa: E402
 
 
 def annotations(path: Path) -> dict[str, dict]:
@@ -96,13 +98,16 @@ def main():
     selected={value.strip() for value in args.classes.split(",") if value.strip()}
     missing=selected-set(available)
     if missing: parser.error("Классы не найдены: "+", ".join(sorted(missing)))
-    Base.metadata.create_all(engine); db=SessionLocal(); counts={name:0 for name in selected}; sessions={}; samples=0
+    settings=get_settings(); ensure_directories(settings)
+    database=Database(settings.resolved_database_url); upgrade_to_head(database.engine)
+    db=database.session_factory(); counts={name:0 for name in selected}; sessions={}; samples=0
     try:
         classes={}
         for name in selected:
-            item=db.scalar(select(GestureClass).where(GestureClass.name==name))
+            item=db.scalar(select(TrainingClass).where(TrainingClass.normalized_name==name.casefold()))
             if not item:
-                item=GestureClass(name=name,description="Предварительный импорт Slovo landmarks; проверьте, что жест статический")
+                item=TrainingClass(name=name,normalized_name=name.casefold(),
+                                   description="Предварительный импорт Slovo landmarks; проверьте, что жест статический")
                 db.add(item); db.flush()
             classes[name]=item
         for attachment_id, frames in json_object_items(args.landmarks):
@@ -113,7 +118,7 @@ def main():
             signer = (row.get("user_id") or attachment_id).strip()
             key = (name, signer)
             if key not in sessions:
-                session = CaptureSession(gesture_class_id=classes[name].id, note=f"Slovo: signer={signer}")
+                session = TrainingSession(class_id=classes[name].id, note=f"Slovo: signer={signer}"[:200])
                 db.add(session)
                 db.flush()
                 sessions[key] = session
@@ -121,13 +126,15 @@ def main():
             for index in indexes:
                 for raw in variants(frames[int(index)]):
                     try:
-                        feature = extract_features(raw)
-                    except ValueError:
+                        feature = extract_static_features(raw)
+                    except FeatureError:
                         continue
                     db.add(
                         TrainingSample(
                             session_id=sessions[key].id,
+                            kind="static",
                             features_json=json.dumps(feature.tolist()),
+                            frame_count=1,
                         )
                     )
                     samples += 1
@@ -137,7 +144,8 @@ def main():
             if all(counts[class_name] >= args.max_videos_per_class for class_name in selected):
                 break
         db.commit()
-    finally: db.close()
+    finally:
+        db.close(); database.dispose()
     print(json.dumps({"videos":counts,"samples":samples,"classes":sorted(selected)},ensure_ascii=False,indent=2))
     print("Теперь запустите приложение и нажмите «Обучить модель» в AI Studio.")
 

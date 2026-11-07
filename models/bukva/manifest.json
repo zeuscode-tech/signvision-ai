@@ -1,0 +1,35 @@
+{
+  "id": "bukva-mobilenetv2-tsm",
+  "name": "Bukva MobileNetV2-TSM (дактильный алфавит)",
+  "version": "1.0",
+  "type": "isolated_sign",
+  "model_path": "bukva_mobilenetv2_tsm.onnx",
+  "labels_path": "labels.json",
+  "input_shape": [1, 8, 3, 224, 224],
+  "frame_count": 8,
+  "output": "probabilities",
+  "no_event_label": "Нет жеста",
+  "confidence_threshold": 0.45,
+  "stability_count": 1,
+  "cooldown_ms": 800,
+  "inference_stride": 4,
+  "providers": ["CoreMLExecutionProvider", "CPUExecutionProvider"],
+  "preprocessing": {
+    "color": "RGB",
+    "width": 224,
+    "height": 224,
+    "resize": "pad",
+    "pad_value": 114,
+    "crop": "none",
+    "normalization": "imagenet",
+    "layout": "NTCHW"
+  },
+  "source": {
+    "project": "ai-forever/bukva",
+    "url": "https://github.com/ai-forever/bukva",
+    "license": "Bukva custom CC BY-SA 4.0 variant; see docs/THIRD_PARTY_DATA.md",
+    "sha256": "c8bff60a5da17f63d45a4d0fa348b402938d2fb5db8c672cf8b7ca04ec0c3dba",
+    "reported_top1": 0.836,
+    "notes": "33 letters + no_event. Threshold 0.45 is a conservative local rejection rule, not a published calibration."
+  }
+}
